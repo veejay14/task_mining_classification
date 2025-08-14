@@ -1,0 +1,70 @@
+# config.yaml
+
+data:
+
+  data_csv: "data/code_challenge_dataset.csv"
+  event_col: "event_name"
+  label_col: "step_name"
+  session_col: "session_id"
+  timestamp_col: "timestamp"
+  cat_features:
+    - "action_type"
+    - "target_app"
+    - "file_extension"
+    - "group_id"
+  text_features:
+    # - "event_name"
+  num_features:
+    - "file_path_depth"
+    # - "event_name_length"
+    - "elapsed_time"
+    # - "session_duration"
+
+  test_size: 0.10
+  val_size: 0.10
+  random_seed: 42
+  batch_size: 32
+
+model:
+  model_type: "transformer"  # "bilstm" or "transformer"
+
+  emb_event_dim: 64 # 64
+  emb_cat_dim: 16 # 16
+  num_proj_dim: 16 # 16
+  fusion_mode: concat  # or 'gated'
+  txt_proj_dim: 32
+  img_proj_dim: 32
+  pad_idx: 0
+  unk_idx: 1
+
+  # BiLSTM params
+  lstm_hidden_dim: 128
+  lstm_num_layers: 2
+  lstm_dropout: 0.4
+  lstm_rnn_dropout: 0.2
+
+  # Transformer params
+  d_model: 128
+  nhead: 4
+  tf_num_layers: 4
+  tf_ff_dim: 256
+  tf_dropout: 0.3
+
+train:
+  lr: 0.001
+  weight_decay: 0.0005
+  num_epochs: 50
+  grad_clip: 1.0
+  patience: 2
+  precision_threshold: 0.95
+  ignore_index: -100
+
+  hpo:
+    enabled: false          # set false to skip tuning
+    n_trials: 20           # total trials
+    timeout_minutes: 60    # optional global timeout
+    metric: "val_loss"     # "val_loss" or "val_macro_f1"
+    direction: "minimize"  # "minimize" for val_loss, "maximize" for F1
+    epochs_per_trial: 15   # deprecated, use epochs_per_fold instead
+    epochs_per_fold: 10    # epochs per fold in k-fold CV
+    k_folds: 5            # number of folds for cross validation

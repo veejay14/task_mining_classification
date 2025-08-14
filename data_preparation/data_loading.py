@@ -45,7 +45,9 @@ class EventFeatureExtractor:
             return None
         m = re.match(r"\s*([\w\*]+)\s*:", event_name, re.IGNORECASE)
         if m:
-            return m.group(1).replace("*", "").capitalize()
+            # Capitalize first letter, but keep '*' if present
+            word = m.group(1)
+            return word[0].upper() + word[1:]
         return None
 
     @staticmethod

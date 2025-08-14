@@ -1,14 +1,19 @@
-"""
-Evaluation helpers:
-- plain evaluation
-- selective evaluation (only tokens above a probability threshold)
-"""
-
-from __future__ import annotations
-from typing import Tuple, List
+from typing import Tuple, List, Dict, Any  # <-- add Dict, Any if not present
 import torch
 import torch.nn.functional as F
 from sklearn.metrics import classification_report, f1_score
+
+def _unpack_batch(batch):
+    """
+    Support both legacy 5-tuple (tokens, labels, mask, cat_feats, num_feats)
+    and new 7-tuple (..., txt_feats, img_feats).
+    """
+    if len(batch) == 5:
+        tokens, labels, mask, cat_feats, num_feats = batch
+        txt_feats, img_feats = {}, {}
+    else:
+        tokens, labels, mask, cat_feats, num_feats, txt_feats, img_feats = batch
+    return tokens, labels, mask, cat_feats, num_feats, txt_feats, img_feats
 
 
 def evaluate_plain(loader, model, loss_fn, device, num_classes: int, ignore_index: int) -> Tuple[float, float, float, str]:
@@ -18,12 +23,16 @@ def evaluate_plain(loader, model, loss_fn, device, num_classes: int, ignore_inde
     y_true_all, y_pred_all = [], []
 
     with torch.no_grad():
-        for tokens, labels, mask, cat_feats, num_feats in loader:
+        for batch in loader:
+            tokens, labels, mask, cat_feats, num_feats, txt_feats, img_feats = _unpack_batch(batch)
+
             tokens, labels, mask = tokens.to(device), labels.to(device), mask.to(device)
             cat_feats = {k: v.to(device) for k, v in cat_feats.items()}
             num_feats = {k: v.to(device) for k, v in num_feats.items()}
+            txt_feats = {k: v.to(device) for k, v in txt_feats.items()}
+            img_feats = {k: v.to(device) for k, v in img_feats.items()}
 
-            logits = model(tokens, mask, cat_feats, num_feats)
+            logits = model(tokens, mask, cat_feats, num_feats, txt_feats, img_feats)
             loss = loss_fn(logits.view(-1, logits.size(-1)), labels.view(-1))
             tot_loss += loss.item()
 
@@ -31,7 +40,7 @@ def evaluate_plain(loader, model, loss_fn, device, num_classes: int, ignore_inde
             valid = (labels != ignore_index) & mask.bool()
 
             tot_correct += (preds[valid] == labels[valid]).sum().item()
-            tot_tokens += valid.sum().item()
+            tot_tokens  += valid.sum().item()
 
             y_true_all.append(labels[valid].detach().cpu())
             y_pred_all.append(preds[valid].detach().cpu())
@@ -70,12 +79,16 @@ def evaluate_selective(loader, model, loss_fn, device,
     y_true_all, y_pred_all = [], []
 
     with torch.no_grad():
-        for tokens, labels, mask, cat_feats, num_feats in loader:
+        for batch in loader:
+            tokens, labels, mask, cat_feats, num_feats, txt_feats, img_feats = _unpack_batch(batch)
+
             tokens, labels, mask = tokens.to(device), labels.to(device), mask.to(device)
             cat_feats = {k: v.to(device) for k, v in cat_feats.items()}
             num_feats = {k: v.to(device) for k, v in num_feats.items()}
+            txt_feats = {k: v.to(device) for k, v in txt_feats.items()}
+            img_feats = {k: v.to(device) for k, v in img_feats.items()}
 
-            logits = model(tokens, mask, cat_feats, num_feats)
+            logits = model(tokens, mask, cat_feats, num_feats, txt_feats, img_feats)
             loss = loss_fn(logits.view(-1, logits.size(-1)), labels.view(-1))
             tot_loss += loss.item()
             total_batches += 1
@@ -88,7 +101,7 @@ def evaluate_selective(loader, model, loss_fn, device,
 
             valid_count += valid.sum().item()
             sel_correct += (preds[selected] == labels[selected]).sum().item()
-            sel_count += selected.sum().item()
+            sel_count   += selected.sum().item()
 
             if selected.any():
                 y_true_all.append(labels[selected].detach().cpu())

@@ -171,11 +171,11 @@ def build_inference_loader(df_prepared: pd.DataFrame,
     df_prepared = ensure_label_column(df_prepared)
 
     # Optional encoders must be recreated (we didn't persist huge models)
-    TEXT_FEATURES = cfg["data"].get("text_features", []) or []
-    IMAGE_PATH_COL = cfg["data"].get("image_path_col", None)
+    text_features = cfg["data"].get("text_features", []) or []
+    image_path_col = cfg["data"].get("image_path_col", None)
 
-    text_encoder = fit_text_encoder(device=str(device)) if TEXT_FEATURES else None
-    image_backbone, image_preprocess = (fit_image_encoder(device=str(device)) if IMAGE_PATH_COL else (None, None))
+    text_encoder = fit_text_encoder(device=str(device)) if text_features else None
+    image_backbone, image_preprocess = (fit_image_encoder(device=str(device)) if image_path_col else (None, None))
 
     ev_ids, lab_ids, cat_list, num_list, txt_list, img_list, txt_dim, img_dim = build_split(
         df_split=df_prepared,
@@ -184,8 +184,8 @@ def build_inference_loader(df_prepared: pd.DataFrame,
         le=artifacts["label_enc"],      # trained label encoder (even if labels are dummy)
         cat_enc=artifacts["cat_enc"],
         num_scaler=artifacts["num_scaler"],
-        text_encoder=text_encoder, text_cols=TEXT_FEATURES,
-        image_path_col=IMAGE_PATH_COL, image_backbone=image_backbone, image_preprocess=image_preprocess
+        text_encoder=text_encoder, text_cols=text_features,
+        image_path_col=image_path_col, image_backbone=image_backbone, image_preprocess=image_preprocess
     )
 
     ds = MultiFeatureSequenceDataset(ev_ids, lab_ids, cat_list, num_list, txt_list, img_list)

@@ -34,8 +34,8 @@ except Exception:  # pragma: no cover
 PAD_IDX = 0
 UNK_IDX = 1
 
-# -------- splitting & generators --------
 
+# -------- splitting & generators --------
 def split_by_session(df: pd.DataFrame,
                      session_col: str,
                      test_size: float,
@@ -87,6 +87,7 @@ def encode_label_sequences(label_seqs: List[List[str]], le: LabelEncoder) -> Lis
     """Encode each label sequence using a fitted LabelEncoder."""
     return [le.transform(seq).tolist() for seq in label_seqs]
 
+
 def fit_cat_encoder(train_df: pd.DataFrame, cat_cols: List[str]) -> OrdinalEncoder | None:
     """Fit an OrdinalEncoder for categorical feature columns."""
     if not cat_cols:
@@ -94,6 +95,7 @@ def fit_cat_encoder(train_df: pd.DataFrame, cat_cols: List[str]) -> OrdinalEncod
     enc = OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1, dtype=np.int64)
     enc.fit(train_df[cat_cols].astype(str))
     return enc
+
 
 def transform_cat_sequences(df: pd.DataFrame,
                             session_col: str,
@@ -115,6 +117,7 @@ def transform_cat_sequences(df: pd.DataFrame,
             out_by_session[c].append(vals[:, j].tolist())
     return out_by_session
 
+
 def cat_vocab_sizes_from_encoder(enc: OrdinalEncoder | None, cat_cols: List[str]) -> Dict[str, int]:
     """Compute embedding vocab sizes for each categorical column (includes PAD & UNK)."""
     if not cat_cols or enc is None:
@@ -125,6 +128,7 @@ def cat_vocab_sizes_from_encoder(enc: OrdinalEncoder | None, cat_cols: List[str]
         sizes[col] = n_cats + 2  # PAD, UNK
     return sizes
 
+
 def fit_numeric_scaler(train_df: pd.DataFrame, num_cols: List[str]) -> StandardScaler | None:
     """Fit a StandardScaler for numeric features (or None if none)."""
     if not num_cols:
@@ -132,6 +136,7 @@ def fit_numeric_scaler(train_df: pd.DataFrame, num_cols: List[str]) -> StandardS
     scaler = StandardScaler()
     scaler.fit(train_df[num_cols].astype(float))
     return scaler
+
 
 def transform_numeric_sequences(df: pd.DataFrame,
                                 session_col: str,
@@ -149,8 +154,8 @@ def transform_numeric_sequences(df: pd.DataFrame,
             out_by_session[c].append(vals[:, j].astype(np.float32).tolist())
     return out_by_session
 
-# -------- OPTIONAL TEXT: encoder + per-session regroup --------
 
+# -------- OPTIONAL TEXT: encoder + per-session regroup --------
 def fit_text_encoder(model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
                      device: str = "cpu"):
     """
@@ -164,6 +169,7 @@ def fit_text_encoder(model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
         return enc
     except Exception:
         return None
+
 
 @torch.no_grad()
 def transform_text_sequences_with_encoder(df: pd.DataFrame,
@@ -180,26 +186,27 @@ def transform_text_sequences_with_encoder(df: pd.DataFrame,
     df_pos = df.reset_index(drop=True)
     texts = df_pos[text_cols].fillna("").astype(str).agg(" ".join, axis=1).tolist()
 
-    # encode in chunks
     embs: List[torch.Tensor] = []
     for i in range(0, len(texts), batch_size):
         chunk = texts[i:i + batch_size]
-        # convert_to_tensor=True avoids numpy dependency
         embs.append(torch.as_tensor(encoder.encode(chunk, convert_to_tensor=True)).cpu())
     if not embs:
         return {}, 0
     embs = torch.cat(embs, dim=0)  # [N, D]
     D = embs.shape[1]
+
     out = {"__text__": []}
     start = 0
     for _, g in df_pos.groupby(session_col, sort=False):
         L = len(g)
-        out["__text__"].append(embs[start:start + L, :].numpy().astype("float32").tolist())
+        out["__text__"].append(
+            embs[start:start + L, :].to(torch.float32).cpu().tolist()
+        )
         start += L
     return out, int(D)
 
-# -------- OPTIONAL IMAGE: backbone + per-session regroup --------
 
+# -------- OPTIONAL IMAGE: backbone + per-session regroup --------
 def fit_image_encoder(device: str = "cpu"):
     """
     Returns (backbone, preprocess) or (None, None) if torchvision is unavailable.
@@ -215,6 +222,7 @@ def fit_image_encoder(device: str = "cpu"):
         return backbone, preprocess
     except Exception:
         return None, None
+
 
 @torch.no_grad()
 def transform_image_sequences_with_encoder(df: pd.DataFrame,
@@ -255,8 +263,8 @@ def transform_image_sequences_with_encoder(df: pd.DataFrame,
         start += L
     return out, 2048
 
-# -------- Build split (now returns text/image lists & dims too) --------
 
+# -------- Build split (now returns text/image lists & dims too) --------
 def build_split(df_split: pd.DataFrame,
                 cfg_data: dict,
                 vocab: Dict[str, int],
@@ -322,8 +330,8 @@ def build_split(df_split: pd.DataFrame,
 
     return ev_ids, lab_ids, cat_list, num_list, txt_list, img_list, txt_dim, img_dim
 
-# -------- Dataset & collate (now include text/image) --------
 
+# -------- Dataset & collate (now include text/image) --------
 class MultiFeatureSequenceDataset(Dataset):
     """PyTorch Dataset that stores per-session sequences and feature dicts."""
 

@@ -325,24 +325,31 @@ def main():
     # --- Load best & evaluate on test ---
     model.load_state_dict(torch.load(art_dir / "best.pt", map_location=device))
 
-    test_loss, test_acc, test_f1, test_report = evaluate_plain(
-        test_loader, model, loss_fn, device,
-        num_classes=len(label_enc.classes_),
-        ignore_index=cfg["train"]["ignore_index"]
-    )
-    print("\n=== Test set (plain) ===")
-    print(f"loss: {test_loss:.4f} | token-acc: {test_acc:.3f} | macro-F1: {test_f1:.3f}")
-    print(test_report)
-
-    # Selective evaluation at threshold (e.g., 0.95)
-    test_loss, test_acc, test_f1, test_report = evaluate_selective(
+    test_loss, test_acc, test_f1, test_report, test_errors = evaluate_plain(
         test_loader, model, loss_fn, device,
         num_classes=len(label_enc.classes_),
         ignore_index=cfg["train"]["ignore_index"],
-        prob_threshold=cfg["train"]["precision_threshold"]
+        return_errors=True,
+        label_names=list(label_enc.classes_),  # nicer names in the report
+        top_k=10
     )
-    print("\n=== Test set (selective) ===")
+    print("\n=== Misclassification analysis (plain test) ===")
     print(test_report)
+    print(test_errors)
+
+    # Selective
+    _, _, _, test_sel_report, test_sel_errors = evaluate_selective(
+        test_loader, model, loss_fn, device,
+        num_classes=len(label_enc.classes_),
+        ignore_index=cfg["train"]["ignore_index"],
+        prob_threshold=cfg["train"]["precision_threshold"],
+        return_errors=True,
+        label_names=list(label_enc.classes_),
+        top_k=10
+    )
+    print("\n=== Misclassification analysis (selective test) ===")
+    print(test_report)
+    print(test_sel_errors)
 
     # --- Save artifacts for inference ---
     with open(art_dir / "event_vocab.json", "w") as f:

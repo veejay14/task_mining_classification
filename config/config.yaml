@@ -7,14 +7,13 @@ data:
   label_col: "step_name"
   session_col: "session_id"
   timestamp_col: "timestamp"
-
-
   cat_features:
     - "action_type"
     - "target_app"
     - "file_extension"
     - "group_id"
-
+  text_features:
+    # - "event_name"
   num_features:
     - "file_path_depth"
     # - "event_name_length"

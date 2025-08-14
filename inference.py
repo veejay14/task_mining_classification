@@ -2,7 +2,7 @@
 """
 End-to-end inference on RAW event logs:
 - Load cfg + artifacts (vocab/encoders/scaler) + trained checkpoint
-- Build features from raw CSV (event-name + time)
+- Build features from raw CSV (event-name + time + optional text/image)
 - Encode sequences with saved encoders
 - Run model to get predictions
 - Optional selective labeling via probability threshold
@@ -24,9 +24,10 @@ from config.config import cfg
 from modelling.models import MultiFeatureBiLSTMTagger, MultiFeatureTransformerTagger
 from data_preparation.data_pipeline import (
     build_split, MultiFeatureSequenceDataset, collate_batch,
-    cat_vocab_sizes_from_encoder
+    cat_vocab_sizes_from_encoder,
+    fit_text_encoder, fit_image_encoder,   # <-- NEW
 )
-from data_preparation.data_loading import EventLogDataBuilder  # <-- your raw->features module
+from data_preparation.data_loading import EventLogDataBuilder
 
 
 # ----------------------------- Artifact I/O -----------------------------
@@ -40,7 +41,7 @@ def load_artifacts(art_dir: str | Path) -> Dict[str, Any]:
       - num_scaler.pkl  (optional if no numeric features)
     """
     art_dir = Path(art_dir)
-    artifacts = {}
+    artifacts: Dict[str, Any] = {}
 
     with open(art_dir / "event_vocab.json", "r") as f:
         artifacts["event_vocab"] = json.load(f)
@@ -60,12 +61,20 @@ def load_artifacts(art_dir: str | Path) -> Dict[str, Any]:
 def build_model_from_cfg(event_vocab: Dict[str, int],
                          cat_enc,
                          device: torch.device,
-                         num_classes: int):
+                         num_classes: int,
+                         # NEW dims to match training
+                         txt_in_dim: int,
+                         img_in_dim: int):
     """
-    Rebuild a model instance that matches training-time config.
+    Rebuild a model instance that matches training-time config,
+    including multimodal dimensions.
     """
     model_type = cfg["model"]["model_type"]
     cat_vocab_sizes = cat_vocab_sizes_from_encoder(cat_enc, cfg["data"]["cat_features"])
+
+    fusion_mode = cfg["model"].get("fusion_mode", "concat")
+    txt_proj_dim = cfg["model"].get("txt_proj_dim", 32)
+    img_proj_dim = cfg["model"].get("img_proj_dim", 32)
 
     if model_type == "bilstm":
         model = MultiFeatureBiLSTMTagger(
@@ -76,12 +85,20 @@ def build_model_from_cfg(event_vocab: Dict[str, int],
             emb_cat_dim=cfg["model"]["emb_cat_dim"],
             num_cols=cfg["data"]["num_features"],
             num_proj_dim=cfg["model"]["num_proj_dim"],
+            # multimodal
+            txt_in_dim=txt_in_dim,
+            txt_proj_dim=txt_proj_dim,
+            img_in_dim=img_in_dim,
+            img_proj_dim=img_proj_dim,
+            # rnn
             hidden_dim=cfg["model"]["lstm_hidden_dim"],
             num_layers=cfg["model"]["lstm_num_layers"],
             pad_idx=cfg["model"]["pad_idx"],
             dropout_p=cfg["model"]["lstm_dropout"],
             rnn_dropout=cfg["model"]["lstm_rnn_dropout"],
+            fusion_mode=fusion_mode,
         ).to(device)
+
     elif model_type == "transformer":
         model = MultiFeatureTransformerTagger(
             vocab_size=len(event_vocab),
@@ -91,12 +108,19 @@ def build_model_from_cfg(event_vocab: Dict[str, int],
             emb_cat_dim=cfg["model"]["emb_cat_dim"],
             num_cols=cfg["data"]["num_features"],
             num_proj_dim=cfg["model"]["num_proj_dim"],
+            # multimodal
+            txt_in_dim=txt_in_dim,
+            txt_proj_dim=txt_proj_dim,
+            img_in_dim=img_in_dim,
+            img_proj_dim=img_proj_dim,
+            # transformer
             d_model=cfg["model"]["d_model"],
             nhead=cfg["model"]["nhead"],
             num_layers=cfg["model"]["tf_num_layers"],
             dim_feedforward=cfg["model"]["tf_ff_dim"],
             dropout=cfg["model"]["tf_dropout"],
             pad_idx=cfg["model"]["pad_idx"],
+            fusion_mode=fusion_mode,
         ).to(device)
     else:
         raise ValueError("cfg['model']['model_type'] must be 'bilstm' or 'transformer'")
@@ -118,6 +142,7 @@ def load_and_prepare_raw_dataframe() -> pd.DataFrame:
       - event-name features (action/app/path/etc.)
       - time features (elapsed/session_duration)
       - sorting / NA handling consistent with training
+      - optional text/image columns as configured
     """
     builder = EventLogDataBuilder(cfg)
     df = builder.load_and_prepare("data/predictions.csv")
@@ -137,23 +162,35 @@ def ensure_label_column(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_inference_loader(df_prepared: pd.DataFrame,
-                           artifacts: Dict[str, Any]) -> DataLoader:
+                           artifacts: Dict[str, Any],
+                           device: torch.device) -> Tuple[DataLoader, int, int]:
     """
     Encode the prepared dataframe using saved encoders/scalers and return a DataLoader.
+    Also returns (txt_dim, img_dim) so the model can be rebuilt with matching shapes.
     """
     df_prepared = ensure_label_column(df_prepared)
 
-    ev_ids, lab_ids, cat_list, num_list = build_split(
+    # Optional encoders must be recreated (we didn't persist huge models)
+    text_features = cfg["data"].get("text_features", []) or []
+    image_path_col = cfg["data"].get("image_path_col", None)
+
+    text_encoder = fit_text_encoder(device=str(device)) if text_features else None
+    image_backbone, image_preprocess = (fit_image_encoder(device=str(device)) if image_path_col else (None, None))
+
+    ev_ids, lab_ids, cat_list, num_list, txt_list, img_list, txt_dim, img_dim = build_split(
         df_split=df_prepared,
         cfg_data=cfg["data"],
         vocab=artifacts["event_vocab"],
-        le=artifacts["label_enc"],      # use trained label encoder (even if labels are dummy)
+        le=artifacts["label_enc"],      # trained label encoder (even if labels are dummy)
         cat_enc=artifacts["cat_enc"],
-        num_scaler=artifacts["num_scaler"]
+        num_scaler=artifacts["num_scaler"],
+        text_encoder=text_encoder, text_cols=text_features,
+        image_path_col=image_path_col, image_backbone=image_backbone, image_preprocess=image_preprocess
     )
 
-    ds = MultiFeatureSequenceDataset(ev_ids, lab_ids, cat_list, num_list)
-    return DataLoader(ds, batch_size=cfg["data"]["batch_size"], shuffle=False, collate_fn=collate_batch)
+    ds = MultiFeatureSequenceDataset(ev_ids, lab_ids, cat_list, num_list, txt_list, img_list)
+    loader = DataLoader(ds, batch_size=cfg["data"]["batch_size"], shuffle=False, collate_fn=collate_batch)
+    return loader, txt_dim, img_dim
 
 
 # ---------------------------- Inference API ----------------------------
@@ -172,14 +209,16 @@ def predict_with_threshold(model: torch.nn.Module,
     model.eval()
     out_preds, out_conf, out_mask = [], [], []
 
-    for tokens, labels, mask, cat_feats, num_feats in loader:
+    for tokens, labels, mask, cat_feats, num_feats, txt_feats, img_feats in loader:
         tokens, mask = tokens.to(device), mask.to(device)
         cat_feats = {k: v.to(device) for k, v in cat_feats.items()}
         num_feats = {k: v.to(device) for k, v in num_feats.items()}
+        txt_feats = {k: v.to(device) for k, v in txt_feats.items()}
+        img_feats = {k: v.to(device) for k, v in img_feats.items()}
 
-        logits = model(tokens, mask, cat_feats, num_feats)   # [B,T,C]
-        probs = F.softmax(logits, dim=-1)                    # [B,T,C]
-        conf, pred = probs.max(dim=-1)                       # [B,T], [B,T]
+        logits = model(tokens, mask, cat_feats, num_feats, txt_feats, img_feats)   # [B,T,C]
+        probs = F.softmax(logits, dim=-1)                                          # [B,T,C]
+        conf, pred = probs.max(dim=-1)                                             # [B,T], [B,T]
         take = (conf >= prob_threshold) & mask.bool()
         pred_out = torch.where(take, pred, torch.full_like(pred, unlabeled_code))
 
@@ -204,57 +243,39 @@ def attach_predictions_to_df(df_prepared: pd.DataFrame,
     Map predictions (per-session sequences) back to the row order in df_prepared.
     Assumes df_prepared was sorted by [session_id, timestamp] like in training.
     """
-    # Flatten to [N,T] → a single long vector following the dataset/session order
     preds = flatten_batches(preds_bt)   # [N,T] padded
     confs = flatten_batches(conf_bt)    # [N,T]
     masks = flatten_batches(mask_bt)    # [N,T]
 
-    # Turn padded batch shape back into a flat list of valid positions
     valid_idx = masks.bool()
-    flat_preds = preds[valid_idx]   # [M]
-    flat_confs = confs[valid_idx]   # [M]
+    flat_preds = preds[valid_idx]       # [M]
+    flat_confs = confs[valid_idx]       # [M]
 
-    # Decode classes where not abstained
     pred_ids = flat_preds.tolist()
     conf_vals = flat_confs.tolist()
 
-    # Build decoded labels; handle unlabeled_code=-1
-    decoded = []
-    for p in pred_ids:
-        if p < 0:  # abstained
-            decoded.append(None)
-        else:
-            decoded.append(label_enc.inverse_transform([int(p)])[0])
-
-    # Allocate result cols and fill by walking rows in session order
     out = df_prepared.copy()
     out["pred_step_id"] = np.nan
     out["pred_step_name"] = None
     out["pred_confidence"] = np.nan
 
-    # We need per-session lengths in the same order used by the dataset
     session_col = cfg["data"]["session_col"]
-    event_col = cfg["data"]["event_col"]
 
-    # Iterate sessions in the same order as groupby(sort=False) used in the encoder
+    # Walk sessions in the same order used to encode
     offset = 0
     for sid, g in out.groupby(session_col, sort=False):
-        # valid positions for this session = length of this session
         L = len(g)
-        # take next L predictions/confidences from flat streams
-        # (They are already filtered to only valid positions, so we just slice)
         pred_slice = pred_ids[offset: offset + L]
         conf_slice = conf_vals[offset: offset + L]
         offset += L
 
         idx = g.index
-        # Fill results
         out.loc[idx, "pred_step_id"] = pred_slice
         out.loc[idx, "pred_confidence"] = conf_slice
-        # decode names safely
-        names = []
+
+        names: List[str | None] = []
         for p in pred_slice:
-            if p < 0:
+            if p is None or (isinstance(p, (int, float)) and int(p) < 0):
                 names.append(None)
             else:
                 names.append(label_enc.inverse_transform([int(p)])[0])
@@ -268,26 +289,28 @@ def attach_predictions_to_df(df_prepared: pd.DataFrame,
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # 1) artifacts + model
+    # 1) artifacts
     artifacts = load_artifacts("trained_artifacts")
     label_enc = artifacts["label_enc"]
     if label_enc is None:
         raise RuntimeError("label_encoder.pkl not found — required to size classifier and decode predictions.")
     num_classes = len(label_enc.classes_)
 
+    # 2) RAW → FEATURES (+ get txt/img dims for model shape)
+    df_prepared = load_and_prepare_raw_dataframe()
+    df_prepared = df_prepared.sort_values([cfg["data"]["session_col"], cfg["data"]["timestamp_col"]])
+    loader, txt_dim, img_dim = build_inference_loader(df_prepared, artifacts, device)
+
+    # 3) Build model with dims matching training (txt/img) and load weights
     model = build_model_from_cfg(
         event_vocab=artifacts["event_vocab"],
         cat_enc=artifacts["cat_enc"],
         device=device,
-        num_classes=num_classes
+        num_classes=num_classes,
+        txt_in_dim=txt_dim,
+        img_in_dim=img_dim
     )
     load_checkpoint(model, "trained_artifacts/best.pt", device)
-
-    # 2) RAW → FEATURES
-    df_prepared = load_and_prepare_raw_dataframe()  # uses your EventLogDataBuilder
-
-    # 3) FEATURES → DATALOADER (encode with saved encoders)
-    loader = build_inference_loader(df_prepared, artifacts)
 
     # 4) INFERENCE with abstention
     preds_bt, conf_bt, mask_bt = predict_with_threshold(

@@ -4,7 +4,6 @@ Training script:
 - loads YAML config
 - reads CSV and prepares splits
 - builds vocab/encoders/scalers on TRAIN
-- (optional) runs Optuna HPO to get best_params
 - builds FINAL model with best_params (or YAML defaults)
 - trains with early stopping + LR scheduling
 - evaluates on test (plain + selective)
@@ -26,7 +25,8 @@ from config.config import cfg
 from data_preparation.data_pipeline import (
     split_by_session, session_sequence_generator, build_event_vocab, fit_label_encoder,
     fit_cat_encoder, cat_vocab_sizes_from_encoder, fit_numeric_scaler, build_split,
-    MultiFeatureSequenceDataset, collate_batch
+    MultiFeatureSequenceDataset, collate_batch,
+    fit_text_encoder, fit_image_encoder  # <-- NEW
 )
 from data_preparation.data_loading import EventLogDataBuilder
 from modelling.models import MultiFeatureBiLSTMTagger, MultiFeatureTransformerTagger
@@ -36,8 +36,16 @@ from hyperparameter_tuning.tuner import run_hpo
 
 # ------------------------------ Helpers -------------------------------
 
-def _build_model_from_params(model_type, event_vocab, num_classes, cat_vocab_sizes, params, device):
-    """Factory to build a model from a param dict (used by HPO and final build)."""
+def _build_model_from_params(model_type, event_vocab, num_classes, cat_vocab_sizes, params, device,
+                             txt_in_dim: int, img_in_dim: int):
+    """
+    Factory to build a model from a param dict (used by HPO and final build).
+    Adds txt/img input dims and fusion options from YAML.
+    """
+    fusion_mode = cfg["model"].get("fusion_mode", "concat")
+    txt_proj_dim = cfg["model"].get("txt_proj_dim", 32)
+    img_proj_dim = cfg["model"].get("img_proj_dim", 32)
+
     if model_type == "bilstm":
         return MultiFeatureBiLSTMTagger(
             vocab_size=len(event_vocab),
@@ -47,12 +55,20 @@ def _build_model_from_params(model_type, event_vocab, num_classes, cat_vocab_siz
             emb_cat_dim=params["emb_cat_dim"],
             num_cols=cfg["data"]["num_features"],
             num_proj_dim=params["num_proj_dim"],
+            # multimodal
+            txt_in_dim=txt_in_dim,
+            txt_proj_dim=txt_proj_dim,
+            img_in_dim=img_in_dim,
+            img_proj_dim=img_proj_dim,
+            # rnn
             hidden_dim=params["hidden_dim"],
             num_layers=params["num_layers"],
             pad_idx=cfg["model"]["pad_idx"],
             dropout_p=params["dropout_p"],
             rnn_dropout=params["rnn_dropout"],
+            fusion_mode=fusion_mode,
         ).to(device)
+
     elif model_type == "transformer":
         return MultiFeatureTransformerTagger(
             vocab_size=len(event_vocab),
@@ -62,13 +78,21 @@ def _build_model_from_params(model_type, event_vocab, num_classes, cat_vocab_siz
             emb_cat_dim=params["emb_cat_dim"],
             num_cols=cfg["data"]["num_features"],
             num_proj_dim=params["num_proj_dim"],
+            # multimodal
+            txt_in_dim=txt_in_dim,
+            txt_proj_dim=txt_proj_dim,
+            img_in_dim=img_in_dim,
+            img_proj_dim=img_proj_dim,
+            # tf
             d_model=params["d_model"],
             nhead=params["nhead"],
             num_layers=params["num_layers"],
             dim_feedforward=params["dim_feedforward"],
             dropout=params["dropout"],
             pad_idx=cfg["model"]["pad_idx"],
+            fusion_mode=fusion_mode,
         ).to(device)
+
     else:
         raise ValueError("model_type must be 'bilstm' or 'transformer'")
 
@@ -168,23 +192,33 @@ def main():
     num_scaler = fit_numeric_scaler(train_df, cfg["data"]["num_features"])
     cat_vocab_sizes = cat_vocab_sizes_from_encoder(cat_enc, cfg["data"]["cat_features"])
 
-    # --- Build datasets/loaders ---
-    def make_ds(split_df):
-        ev_ids, lab_ids, cat_list, num_list = build_split(
-            split_df, cfg["data"], event_vocab, label_enc, cat_enc, num_scaler
-        )
-        return MultiFeatureSequenceDataset(ev_ids, lab_ids, cat_list, num_list)
+    # --- Optional text & image encoders (pretrained) ---
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    TEXT_FEATURES = cfg["data"].get("text_features", []) or []
+    IMAGE_PATH_COL = cfg["data"].get("image_path_col", None)
 
-    train_ds = make_ds(train_df)
-    val_ds   = make_ds(val_df)
-    test_ds  = make_ds(test_df)
+    text_encoder = fit_text_encoder(device=str(device)) if TEXT_FEATURES else None
+    image_backbone, image_preprocess = (fit_image_encoder(device=str(device)) if IMAGE_PATH_COL else (None, None))
+
+    # --- Build datasets/loaders (now including txt/img & dims) ---
+    def make_ds(split_df):
+        ev_ids, lab_ids, cat_list, num_list, txt_list, img_list, txt_dim, img_dim = build_split(
+            split_df, cfg["data"], event_vocab, label_enc, cat_enc, num_scaler,
+            text_encoder=text_encoder, text_cols=TEXT_FEATURES,
+            image_path_col=IMAGE_PATH_COL, image_backbone=image_backbone, image_preprocess=image_preprocess
+        )
+        ds = MultiFeatureSequenceDataset(ev_ids, lab_ids, cat_list, num_list, txt_list, img_list)
+        return ds, txt_dim, img_dim
+
+    train_ds, txt_dim_train, img_dim_train = make_ds(train_df)
+    val_ds,   _,             _             = make_ds(val_df)
+    test_ds,  _,             _             = make_ds(test_df)
 
     train_loader = DataLoader(train_ds, batch_size=cfg["data"]["batch_size"], shuffle=True,  collate_fn=collate_batch)
     val_loader   = DataLoader(val_ds,   batch_size=cfg["data"]["batch_size"], shuffle=False, collate_fn=collate_batch)
     test_loader  = DataLoader(test_ds,  batch_size=cfg["data"]["batch_size"], shuffle=False, collate_fn=collate_batch)
 
     # --- HPO (optional) to get best_params ---
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     num_classes = len(label_enc.classes_)
     model_type = cfg["model"]["model_type"]
 
@@ -201,7 +235,9 @@ def main():
             ignore_index=cfg["train"]["ignore_index"],
             grad_clip=cfg["train"]["grad_clip"],
             hpo_cfg=cfg["train"]["hpo"],
-            build_model_from_params=_build_model_from_params,
+            build_model_from_params=lambda *args, **kwargs: _build_model_from_params(
+                *args, **kwargs, txt_in_dim=txt_dim_train, img_in_dim=img_dim_train
+            ),
             sample_params=_sample_params,
             metric=cfg["train"]["hpo"]["metric"],
         )
@@ -209,8 +245,11 @@ def main():
     else:
         best_params = _defaults_from_yaml(model_type)
 
-    # --- Build FINAL model using best_params ---
-    model = _build_model_from_params(model_type, event_vocab, num_classes, cat_vocab_sizes, best_params, device)
+    # --- Build FINAL model using best_params (with txt/img dims) ---
+    model = _build_model_from_params(
+        model_type, event_vocab, num_classes, cat_vocab_sizes, best_params, device,
+        txt_in_dim=txt_dim_train, img_in_dim=img_dim_train
+    )
 
     # --- Loss/Optim/Scheduler ---
     loss_fn = nn.CrossEntropyLoss(ignore_index=cfg["train"]["ignore_index"])
@@ -230,13 +269,15 @@ def main():
     for epoch in range(cfg["train"]["num_epochs"]):
         model.train()
         tr_loss = 0.0
-        for tokens, labels, mask, cat_feats, num_feats in train_loader:
+        for tokens, labels, mask, cat_feats, num_feats, txt_feats, img_feats in train_loader:
             tokens, labels, mask = tokens.to(device), labels.to(device), mask.to(device)
             cat_feats = {k: v.to(device) for k, v in cat_feats.items()}
             num_feats = {k: v.to(device) for k, v in num_feats.items()}
+            txt_feats = {k: v.to(device) for k, v in txt_feats.items()}
+            img_feats = {k: v.to(device) for k, v in img_feats.items()}
 
             optimizer.zero_grad()
-            logits = model(tokens, mask, cat_feats, num_feats)
+            logits = model(tokens, mask, cat_feats, num_feats, txt_feats, img_feats)  # <-- pass txt/img
             loss = loss_fn(logits.view(-1, logits.size(-1)), labels.view(-1))
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), cfg["train"]["grad_clip"])
@@ -250,11 +291,14 @@ def main():
         model.eval()
         vl_loss, correct, total = 0.0, 0, 0
         with torch.no_grad():
-            for tokens, labels, mask, cat_feats, num_feats in val_loader:
+            for tokens, labels, mask, cat_feats, num_feats, txt_feats, img_feats in val_loader:
                 tokens, labels, mask = tokens.to(device), labels.to(device), mask.to(device)
                 cat_feats = {k: v.to(device) for k, v in cat_feats.items()}
                 num_feats = {k: v.to(device) for k, v in num_feats.items()}
-                logits = model(tokens, mask, cat_feats, num_feats)
+                txt_feats = {k: v.to(device) for k, v in txt_feats.items()}
+                img_feats = {k: v.to(device) for k, v in img_feats.items()}
+
+                logits = model(tokens, mask, cat_feats, num_feats, txt_feats, img_feats)
                 vl_loss += loss_fn(logits.view(-1, logits.size(-1)), labels.view(-1)).item()
                 preds = logits.argmax(-1)
                 valid = mask.bool()
@@ -281,24 +325,31 @@ def main():
     # --- Load best & evaluate on test ---
     model.load_state_dict(torch.load(art_dir / "best.pt", map_location=device))
 
-    test_loss, test_acc, test_f1, test_report = evaluate_plain(
-        test_loader, model, loss_fn, device,
-        num_classes=len(label_enc.classes_),
-        ignore_index=cfg["train"]["ignore_index"]
-    )
-    print("\n=== Test set (plain) ===")
-    print(f"loss: {test_loss:.4f} | token-acc: {test_acc:.3f} | macro-F1: {test_f1:.3f}")
-    print(test_report)
-
-    # Selective evaluation at threshold (e.g., 0.95)
-    test_loss, test_acc, test_f1, test_report = evaluate_selective(
+    test_loss, test_acc, test_f1, test_report, test_errors = evaluate_plain(
         test_loader, model, loss_fn, device,
         num_classes=len(label_enc.classes_),
         ignore_index=cfg["train"]["ignore_index"],
-        prob_threshold=cfg["train"]["precision_threshold"]
+        return_errors=True,
+        label_names=list(label_enc.classes_),  # nicer names in the report
+        top_k=10
     )
-    print("\n=== Test set (selective) ===")
+    print("\n=== Misclassification analysis (plain test) ===")
     print(test_report)
+    print(test_errors)
+
+    # Selective
+    _, _, _, test_sel_report, test_sel_errors = evaluate_selective(
+        test_loader, model, loss_fn, device,
+        num_classes=len(label_enc.classes_),
+        ignore_index=cfg["train"]["ignore_index"],
+        prob_threshold=cfg["train"]["precision_threshold"],
+        return_errors=True,
+        label_names=list(label_enc.classes_),
+        top_k=10
+    )
+    print("\n=== Misclassification analysis (selective test) ===")
+    print(test_report)
+    print(test_sel_errors)
 
     # --- Save artifacts for inference ---
     with open(art_dir / "event_vocab.json", "w") as f:
@@ -309,6 +360,7 @@ def main():
     if num_scaler is not None:
         joblib.dump(num_scaler, art_dir / "num_scaler.pkl")
 
+    # (Text/image encoders are large; typically NOT saved. Recreate at inference if needed.)
     print(f"Artifacts saved to: {art_dir.resolve()}")
 
 

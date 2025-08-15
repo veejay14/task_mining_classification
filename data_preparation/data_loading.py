@@ -1,18 +1,5 @@
-# data_loader.py
 """
 Data loading & feature engineering for task-mining event logs.
-
-Usage (in train.py):
-    from config import cfg
-    from data_loader import EventLogDataBuilder
-
-    builder = EventLogDataBuilder(cfg)
-    df = builder.load_and_prepare()
-
-    # df is sorted and enriched with:
-    # ['action_type', 'target_app', 'file_extension', 'file_path_depth',
-    #  'is_sharepoint', 'event_name_length', 'first_number',
-    #  'elapsed_time', 'session_duration']
 """
 
 from __future__ import annotations
@@ -95,6 +82,9 @@ class EventFeatureExtractor:
         return path.count("\\")
 
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Extract event based features for the given dataframe
+        """
         col = self.event_col
         if col not in df.columns:
             raise KeyError(f"EventFeatureExtractor: '{col}' not found in DataFrame.")
@@ -124,7 +114,6 @@ class TimeFeatureEngineer:
 
     def _ensure_datetime(self, df: pd.DataFrame) -> pd.DataFrame:
         out = df.copy()
-        # Use format='mixed' to handle varying forms; coerce errors to NaT
         out[self.timestamp_col] = pd.to_datetime(out[self.timestamp_col], format="mixed", errors="coerce")
         return out
 
@@ -189,6 +178,9 @@ class EventLogDataBuilder:
         return df
 
     def _assert_columns(self, df: pd.DataFrame) -> None:
+        """
+        Check for missing required columns in the dataframe.
+        """
         missing = [c for c in self.required_columns if c not in df.columns]
         if missing:
             raise KeyError(f"Missing required columns: {missing}. Present: {list(df.columns)}")
@@ -198,14 +190,9 @@ class EventLogDataBuilder:
         Applies light NA handling for categorical & numeric features used downstream.
         """
         out = df.copy()
-
-        # Ensure dtypes are string for textual cols to avoid errors downstream
         for c in [self.cfg["data"]["event_col"], "group_id"]:
             if c in out.columns:
                 out[c] = out[c].astype(str)
-
-        # Minimal NA handling for columns we may create downstream
-        # (you can adjust/improve in your training pipeline)
         return out
 
     def load_and_prepare(self, file_path) -> pd.DataFrame:
@@ -229,8 +216,7 @@ class EventLogDataBuilder:
         # 2) time features
         df = self.time_fx.transform(df)
 
-        # 3) optional NA handling for model convenience
-        #    (these match your earlier choices; keep consistent with training)
+        # 3) NA handling for model convenience
         for c in ["action_type", "target_app", "file_extension"]:
             if c in df.columns:
                 df[c] = df[c].fillna("unknown")
@@ -238,7 +224,6 @@ class EventLogDataBuilder:
             if c in df.columns:
                 df[c] = df[c].fillna(-1)
         if "is_sharepoint" in df.columns:
-            # keep boolean; your encoders can cast/encode later
             df["is_sharepoint"] = df["is_sharepoint"].fillna(False)
 
         # 4) final sort

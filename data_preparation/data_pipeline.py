@@ -13,12 +13,14 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, OrdinalEncoder, StandardScaler
+from PIL import Image
 
 # torch
 import torch
 from torch import nn
 from torch.utils.data import Dataset
 from torch.nn.utils.rnn import pad_sequence
+
 
 # Optional heavy libs (ok if missing when you don't use text/images)
 try:
@@ -28,7 +30,7 @@ except Exception:  # pragma: no cover
 
 try:
     from torchvision import models
-except Exception:  # pragma: no cover
+except Exception:
     models = None
 
 PAD_IDX = 0
@@ -237,8 +239,6 @@ def transform_image_sequences_with_encoder(df: pd.DataFrame,
     """
     if not image_path_col or image_path_col not in df.columns or backbone is None or preprocess is None:
         return {}, 0
-
-    from PIL import Image  # pillow runtime import
     df_pos = df.reset_index(drop=True)
     vecs: List[torch.Tensor] = []
     for pth in df_pos[image_path_col].tolist():

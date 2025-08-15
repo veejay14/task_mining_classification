@@ -5,7 +5,6 @@ Model definitions:
 """
 
 from __future__ import annotations
-from typing import Dict, List
 import torch
 import torch.nn as nn
 

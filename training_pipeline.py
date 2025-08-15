@@ -1,4 +1,3 @@
-# train.py
 """
 Training script:
 - loads YAML config
@@ -16,7 +15,6 @@ from pathlib import Path
 import json
 import joblib
 
-import pandas as pd
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -99,7 +97,6 @@ def _build_model_from_params(model_type, event_vocab, num_classes, cat_vocab_siz
 
 def _sample_params(trial, model_type):
     """Search space for HPO (used by hpo/tuner.py via dependency injection)."""
-    import optuna
     if model_type == "bilstm":
         return {
             "emb_event_dim": trial.suggest_categorical("emb_event_dim", [32, 48, 64, 96]),
@@ -333,12 +330,12 @@ def main():
         label_names=list(label_enc.classes_),  # nicer names in the report
         top_k=10
     )
-    print("\n=== Misclassification analysis (plain test) ===")
+    print("\n=== Test set (plain) ===")
+    print(f"loss: {test_loss:.4f} | token-acc: {test_acc:.3f} | macro-F1: {test_f1:.3f}")
     print(test_report)
-    print(test_errors)
 
     # Selective
-    _, _, _, test_sel_report, test_sel_errors = evaluate_selective(
+    test_sel_loss, test_sel_acc, test_sel_f1, test_sel_report, test_sel_errors = evaluate_selective(
         test_loader, model, loss_fn, device,
         num_classes=len(label_enc.classes_),
         ignore_index=cfg["train"]["ignore_index"],
@@ -347,8 +344,13 @@ def main():
         label_names=list(label_enc.classes_),
         top_k=10
     )
-    print("\n=== Misclassification analysis (selective test) ===")
-    print(test_report)
+    print("\n=== Test set (selective >95%) ===")
+    print(f"loss: {test_sel_loss:.4f} | token-acc: {test_sel_acc:.3f} | macro-F1: {test_sel_f1:.3f}")
+    print(test_sel_report)
+
+    print("\n=== Misclassification analysis (plain test) ===")
+    print(test_errors)
+    print("\n=== Misclassification analysis (selective test >95%) ===")
     print(test_sel_errors)
 
     # --- Save artifacts for inference ---

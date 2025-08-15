@@ -26,7 +26,7 @@ data:
   batch_size: 32
 
 model:
-  model_type: "transformer"  # "bilstm" or "transformer"
+  model_type: "bilstm"  # "bilstm" or "transformer"
 
   emb_event_dim: 64 # 64
   emb_cat_dim: 16 # 16

@@ -206,7 +206,7 @@ def evaluate_selective(
             zero_division=0,
             target_names=(label_names if label_names else [str(c) for c in range(num_classes)])
         )
-        report = f"Coverage (fraction labeled at ≥{prob_threshold:.2f}): {coverage:.3f}\n" + base_report
+        report = f"=====Coverage (fraction labeled at ≥{prob_threshold:.2f}): {coverage:.3f}\n" + base_report
         errors = _misclassification_summary(
             y_true, y_pred, num_classes,
             label_names=(label_names if label_names else [str(c) for c in range(num_classes)]),

@@ -4,7 +4,6 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.idea/*
 .Python
 build/
 develop-eggs/
@@ -22,6 +21,7 @@ wheels/
 .installed.cfg
 *.egg
 MANIFEST
+catboost_info/
 
 # Virtual environments
 venv/

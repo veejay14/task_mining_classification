@@ -550,60 +550,102 @@ This enables both local feature extraction and global sequence understanding.
 - Enable batch processing
 
 
-# Improvements for the current method
-**Data Handling & Preprocessing**:
+# Model Results Comparison
+## 1. Summary Table of Results
 
-- Address imbalanced datasets through resampling strategies, class weights, or focal loss.
+| Model                     | Setting              | Token Accuracy | Macro-F1 | Coverage ≥95% | Macro-F1 @ ≥95% |
+|----------------------------|----------------------|----------------|----------|----------------|-----------------|
+| **Baseline ML (XGBoost/CatBoost)** | High-confidence only | 0.98           | 0.49     | 0.278          | 0.49            |
+| **BiLSTM**                | Plain (all tokens)   | 0.921          | 0.817    | –              | –               |
+|                            | ≥95% confidence      | 0.978          | 0.789    | 0.737          | 0.789           |
+| **Transformer**           | Plain (all tokens)   | 0.916          | 0.790    | –              | –               |
+|                            | ≥95% confidence      | 0.969          | 0.802    | 0.783          | 0.802           |
 
-- Handle missing actions more meaningfully: currently grouped as Unknown, but could be mapped to Action or Action* since they likely represent clicks or similar operations.
+## 2. Observations & Comparisons
 
-**Feature Engineering & Embeddings**
+### Baseline ML (XGBoost / CatBoost)
 
-- Better image embeddings: use modern backbones like EfficientNet instead of ImageNet-50 features.
+**Strengths:**
+- Very high overall accuracy on high-confidence subset (0.98).
+- Strong for dominant, frequent classes (e.g., *Look Up Customer Account*, *Paperwork*).
 
-- Leverage event names as text features:
+**Weaknesses:**
+- Extremely low macro-F1 (0.49) because rare classes (*Account Update Duty Invoice*, *Out of Process*, etc.) are almost never predicted in the high-confidence slice.
+- Coverage is only ~28%, meaning most tokens are left unlabeled at ≥95% confidence.
 
-    - Event names often contain rich, meaningful information (e.g., “Read: IBBR - IBS Customer Master File Inquiry in ibbr-global.dhl”).
+**Likely Reason:**
+- Tree models with one-hot encoding handle frequent categorical patterns well but struggle to generalize to low-frequency or rare sequence patterns without richer temporal context.
 
-    - Different group_ids can map to different contexts, making this distinction useful.
+---
 
-- Numerical information in event names:
+### BiLSTM
 
-    - Some events contain identifiers or codes (e.g., “Read: 6999997944 . A548 . in dpdhl.sharepoint”).
+**Strengths:**
+- Best plain macro-F1 (0.817), meaning it balances performance across frequent and rare classes better than the baseline ML.
+- Coverage @95% is **73.7%**, much higher than baseline.
+- High precision/recall for major classes and reasonable handling of rarer ones (though *Out of Process* suffers).
 
-    - These may carry important semantic information and should be captured explicitly.
+**Weaknesses:**
+- Slight drop in macro-F1 from plain (0.817) to selective (0.789), meaning some rare-class predictions are filtered out when requiring high confidence.
 
-- Experiment with group_id-only predictions to assess predictive power of session grouping.
+**Likely Reason:**
+- Sequence modeling lets it learn patterns across events in a session, improving minority-class prediction.
+- Slight loss in selective mode is expected: high confidence tends to favor majority classes.
 
-- Improved embedding fusion: instead of simple concatenation, try:
+---
 
-    - Adding embeddings (events and other extracted features) before concatenation.
+### Transformer
 
-    - Using specialized fusion mechanisms (e.g., cross-attention, gated fusion).
+**Strengths:**
+- Highest macro-F1 in selective mode (0.802), slightly above BiLSTM.
+- Coverage @95% is the highest of the three models (**78.3%**).
+- Strong performance on most classes, especially *No Account Update Duty Invoice* compared to BiLSTM in selective mode.
 
-# Other approaches to exlore
-**Multimodal Extensions**
+**Weaknesses:**
+- Slightly lower plain macro-F1 than BiLSTM (0.790 vs. 0.817).
+- Like others, struggles with *Out of Process* due to extreme class imbalance.
 
--   Screenshots as input: incorporate visual evidence of user actions, capturing patterns that event metadata alone cannot.
+**Likely Reason:**
+- Transformer self-attention captures long-range dependencies and context effectively, boosting confidence across more samples.
+- May require more data or stronger regularization to catch up with BiLSTM’s macro-F1 in plain mode.
 
-**Model Architectures**:
 
-**Hybrid models**:
+# Improvements for the Current Method
 
-- Temporal Convolutional Networks (TCN) for local temporal patterns: https://github.com/locuslab/TCN
+## Data Handling & Preprocessing
+- **Imbalanced datasets**: Address via resampling strategies, class weights, or focal loss.
+- **Missing actions**: Currently grouped as *Unknown*, but could instead be mapped to *Action* or *Action\** since they often represent clicks or similar operations.
 
-- Attention-based RNNs (e.g., BiLSTM + attention) for contextual focus.
+## Feature Engineering & Embeddings
+- **Image embeddings**: Replace ImageNet-50 features with modern backbones such as EfficientNet for better visual representations.
+- **Event names as text features**:
+  - Event names often contain rich, meaningful information (e.g., *“Read: IBBR - IBS Customer Master File Inquiry in ibbr-global.dhl”*).
+  - Different `group_id`s can map to different contexts, making them useful as distinguishing features.
+- **Numerical information in event names**:
+  - Some events contain identifiers or codes (e.g., *“Read: 6999997944 . A548 . in dpdhl.sharepoint”*).
+  - These may carry semantic information and should be captured explicitly.
+- **Group-only experiments**: Test `group_id`-only predictions to assess the predictive power of session grouping.
+- **Improved embedding fusion**:
+  - Instead of simple concatenation, try additive fusion before concatenation.
+  - Explore specialized mechanisms such as cross-attention or gated fusion.
 
-- HT-Transformers (https://www.arxiv.org/abs/2508.01474):
+---
+
+# Other Approaches to Explore
+
+## Multimodal Extensions
+- **Screenshots as input**: Incorporate visual evidence of user actions, capturing behavioral patterns that metadata alone may miss.
+
+## Model Architectures
+- **Hybrid models**:
+  - Temporal Convolutional Networks (TCN) for capturing local temporal patterns ([TCN repo](https://github.com/locuslab/TCN)).
+  - Attention-based RNNs (e.g., BiLSTM + attention) for contextual focus.
+- **HT-Transformers** ([paper](https://arxiv.org/abs/2508.01474)):
   - Introduce history tokens to encode the entire sequence history.
   - Promising for improving sequence-level accuracy.
 
-**Multimodal Fusion**
-
-- Explore different fusion strategies for combining text, image, and tabular embeddings:
-
-    - Early fusion (embedding-level).
-
-    - Late fusion (decision-level).
-
-    - Cross-modal attention mechanisms.
+## Multimodal Fusion
+- Explore different strategies for combining text, image, and tabular embeddings:
+  - **Early fusion**: Combine embeddings at the feature level.
+  - **Late fusion**: Combine outputs at the decision level.
+  - **Cross-modal attention**: Use attention to align and integrate modalities more effectively.

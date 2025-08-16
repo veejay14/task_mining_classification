@@ -582,13 +582,13 @@ This enables both local feature extraction and global sequence understanding.
     - Using specialized fusion mechanisms (e.g., cross-attention, gated fusion).
 
 # Other approaches to exlore
-Multimodal Extensions
+**Multimodal Extensions**
 
 -   Screenshots as input: incorporate visual evidence of user actions, capturing patterns that event metadata alone cannot.
 
-Model Architectures
+**Model Architectures**:
 
-Hybrid models:
+**Hybrid models**:
 
 - Temporal Convolutional Networks (TCN) for local temporal patterns: https://github.com/locuslab/TCN
 
@@ -598,7 +598,7 @@ Hybrid models:
   - Introduce history tokens to encode the entire sequence history.
   - Promising for improving sequence-level accuracy.
 
-Multimodal Fusion
+**Multimodal Fusion**
 
 - Explore different fusion strategies for combining text, image, and tabular embeddings:
 

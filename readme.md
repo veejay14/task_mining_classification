@@ -551,61 +551,59 @@ This enables both local feature extraction and global sequence understanding.
 
 
 # Improvements for the current method
-Data Handling & Preprocessing
+**Data Handling & Preprocessing**:
 
-Address imbalanced datasets through resampling strategies, class weights, or focal loss.
+- Address imbalanced datasets through resampling strategies, class weights, or focal loss.
 
-Handle missing actions more meaningfully: currently grouped as Unknown, but could be mapped to Action or Action* since they likely represent clicks or similar operations.
+- Handle missing actions more meaningfully: currently grouped as Unknown, but could be mapped to Action or Action* since they likely represent clicks or similar operations.
 
-Feature Engineering & Embeddings
+**Feature Engineering & Embeddings**
 
-Better image embeddings: use modern backbones like EfficientNet instead of ImageNet-50 features.
+- Better image embeddings: use modern backbones like EfficientNet instead of ImageNet-50 features.
 
-Leverage event names as text features:
+- Leverage event names as text features:
 
-Event names often contain rich, meaningful information (e.g., “Read: IBBR - IBS Customer Master File Inquiry in ibbr-global.dhl”).
+    - Event names often contain rich, meaningful information (e.g., “Read: IBBR - IBS Customer Master File Inquiry in ibbr-global.dhl”).
 
-Different group_ids can map to different contexts, making this distinction useful.
+    - Different group_ids can map to different contexts, making this distinction useful.
 
-Numerical information in event names:
+- Numerical information in event names:
 
-Some events contain identifiers or codes (e.g., “Read: 6999997944 . A548 . in dpdhl.sharepoint”).
+    - Some events contain identifiers or codes (e.g., “Read: 6999997944 . A548 . in dpdhl.sharepoint”).
 
-These may carry important semantic information and should be captured explicitly.
+    - These may carry important semantic information and should be captured explicitly.
 
-Experiment with group_id-only predictions to assess predictive power of session grouping.
+- Experiment with group_id-only predictions to assess predictive power of session grouping.
 
-Improved embedding fusion: instead of simple concatenation, try:
+- Improved embedding fusion: instead of simple concatenation, try:
 
-Adding embeddings before concatenation.
+    - Adding embeddings (events and other extracted features) before concatenation.
 
-Using specialized fusion mechanisms (e.g., cross-attention, gated fusion).
+    - Using specialized fusion mechanisms (e.g., cross-attention, gated fusion).
 
 # Other approaches to exlore
 Multimodal Extensions
 
-Screenshots as input: incorporate visual evidence of user actions, capturing patterns that event metadata alone cannot.
+-   Screenshots as input: incorporate visual evidence of user actions, capturing patterns that event metadata alone cannot.
 
 Model Architectures
 
 Hybrid models:
 
-Temporal Convolutional Networks (TCN) for local temporal patterns: https://github.com/locuslab/TCN
+- Temporal Convolutional Networks (TCN) for local temporal patterns: https://github.com/locuslab/TCN
 
-Attention-based RNNs (e.g., BiLSTM + attention) for contextual focus.
+- Attention-based RNNs (e.g., BiLSTM + attention) for contextual focus.
 
-HT-Transformers (https://www.arxiv.org/abs/2508.01474):
-
-Introduce history tokens to encode the entire sequence history.
-
-Promising for improving sequence-level accuracy.
+- HT-Transformers (https://www.arxiv.org/abs/2508.01474):
+  - Introduce history tokens to encode the entire sequence history.
+  - Promising for improving sequence-level accuracy.
 
 Multimodal Fusion
 
-Explore different fusion strategies for combining text, image, and tabular embeddings:
+- Explore different fusion strategies for combining text, image, and tabular embeddings:
 
-Early fusion (embedding-level).
+    - Early fusion (embedding-level).
 
-Late fusion (decision-level).
+    - Late fusion (decision-level).
 
-Cross-modal attention mechanisms.
+    - Cross-modal attention mechanisms.

@@ -13,7 +13,7 @@ This is **sequence labeling** — the output is a label for every element in a s
 ## 🚀 Key Challenges
 
 - **Sequential Nature**: Events are temporally ordered; predictions must consider context
-- **Multimodal Features**: 
+- **Multimodal Features**:
   - Event names (discrete tokens, domain-specific)
   - Categorical features (app names, file extensions)
   - Numeric features (time deltas, path depth)
@@ -31,7 +31,7 @@ This is **sequence labeling** — the output is a label for every element in a s
     └─────────┬───────┘
               │
     ┌─────────▼───────┐
-    │ Feature Extract │ 
+    │ Feature Extract │
     │ & Encoding      │
     └─────────┬───────┘
               │
@@ -86,27 +86,44 @@ results/                       # Inference outputs
 ### Setup with UV (Recommended)
 
 ```bash
-# Clone the repository
-git clone <repository-url>
-cd task_mining_classification
+# 1) Install UV
+# MacOS/Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Install dependencies
+# Windows (PowerShell)
+irm https://astral.sh/uv/install.ps1 | iex
+
+# verify
+ uv --version
+
+# 2) Create a local virtual environment (once)
+uv venv --python 3.10
+# macOS/Linux:
+source .venv/bin/activate
+# Windows PowerShell:
+.venv\Scripts\Activate.ps1
+
+#(You can omit --python 3.10 if your default Python already meets >=3.10.)
+
+3) Install project dependencies
+
 uv sync
 
 # Install with optional multimodal features
-uv sync --extra multimodal --extra dev
-```
+# pick one or both
+uv sync --extra multimodal
+uv sync --extra dev
+# or everything
+uv sync --all-extras
 
-### Setup with pip
+# 4) Run the Project
+# 1.  change the directory to project directory
+cd /<project_directory>/task_classification
+# 2. Run training pipeline
+python /<project_directory>/task_classification/scripts/train.py
+# 3. Inference
+python /<project_directory>/task_classification/scripts/inference.py
 
-```bash
-pip install -r requirements.txt.old
-
-# For multimodal features
-pip install sentence-transformers torchvision Pillow
-
-# For development
-pip install jupyter matplotlib seaborn
 ```
 
 ## 📊 Data Preparation
@@ -129,7 +146,7 @@ Your CSV should contain the following columns:
 ### Example Data
 
 ```csv
-session_id,timestamp,event_name,step_name
+session_id,timestamp,event_name,group_id,step_name
 1,2024-01-01 10:00:00,Write: Document.pdf,Document_Creation
 1,2024-01-01 10:01:00,Read: Settings.ini,Configuration
 1,2024-01-01 10:02:00,Action: Save File,Document_Creation
@@ -150,26 +167,26 @@ data:
   num_features: ["file_path_depth", "elapsed_time"]
   text_features: []  # ["event_name"] to enable text features
   # image_path_col: "image_path"  # Uncomment to enable image features
-  
+
   test_size: 0.10    # 10% for testing
-  val_size: 0.10     # 10% for validation  
+  val_size: 0.10     # 10% for validation
   batch_size: 32
   random_seed: 42
 
 model:
   model_type: "transformer"  # "bilstm" or "transformer"
   fusion_mode: "concat"      # "concat" or "gated"
-  
+
   # Embedding dimensions
   emb_event_dim: 64
   emb_cat_dim: 16
   num_proj_dim: 16
-  
+
   # BiLSTM parameters
   lstm_hidden_dim: 128
   lstm_num_layers: 2
   lstm_dropout: 0.4
-  
+
   # Transformer parameters
   d_model: 128
   nhead: 4
@@ -182,7 +199,7 @@ train:
   num_epochs: 50
   patience: 2
   precision_threshold: 0.95
-  
+
   hpo:
     enabled: false    # Enable k-fold cross-validation HPO
     k_folds: 5
@@ -220,7 +237,7 @@ uv run python -m src.training_pipeline
 
 The training pipeline will:
 1. **Load and preprocess** the data with feature engineering
-2. **Split by sessions** (80% train, 10% val, 10% test)  
+2. **Split by sessions** (80% train, 10% val, 10% test)
 3. **Build vocabularies** and fit encoders on training data only
 4. **Optimize hyperparameters** (if enabled) using k-fold cross-validation
 5. **Train the final model** on combined train+val data (when HPO enabled)
@@ -238,7 +255,7 @@ epoch 1 train loss: 1.2543
 === Test set (plain) ===
 loss: 0.3052 | token-acc: 0.914 | macro-F1: 0.908
 
-=== Test set (selective @ 0.95) ===  
+=== Test set (selective @ 0.95) ===
 Coverage: 0.832 | loss: 0.2101 | token-acc: 0.953 | macro-F1: 0.950
 
 === Misclassification Analysis ===
@@ -281,7 +298,7 @@ This prevents overfitting and provides robust hyperparameter selection.
 # Using UV
 uv run python scripts/inference.py
 
-# Or directly  
+# Or directly
 uv run python -m src.inference
 ```
 
@@ -309,7 +326,7 @@ session_id,event_name,pred_step_name,pred_confidence,pred_step_id
 With `precision_threshold: 0.95`, the model only predicts when ≥95% confident:
 - **Higher precision**: Fewer false positives
 - **Lower coverage**: Some events remain unlabeled
-- **Business value**: Send uncertain cases for manual review
+- **Business value**: We could send uncertain cases for manual review
 
 ```
 Coverage: 0.832 | Precision: 0.953 | F1: 0.950
@@ -331,8 +348,9 @@ Coverage: 0.832 | Precision: 0.953 | F1: 0.950
 ```
 fused = [event_emb; cat_embs; num_proj; text_proj; img_proj]
 ```
+Current used this method.
 
-#### Gated Fusion Mode  
+#### Gated Fusion Mode
 ```
 fused = base + α_text × text_proj + α_img × img_proj
 where α weights are learned per modality
@@ -379,7 +397,7 @@ where α weights are learned per modality
 
 ### Multimodal Features
 
-Enable text features:
+Enable text features: (data not available)
 ```yaml
 data:
   text_features: ["event_name"]
@@ -387,7 +405,7 @@ model:
   txt_proj_dim: 32
 ```
 
-Enable image features:
+Enable image features: (data not available)
 ```yaml
 data:
   image_path_col: "screenshot_path"
@@ -397,11 +415,39 @@ model:
 
 ### Model Architecture Selection
 
-**BiLSTM** for:
-- Smaller datasets (< 50K events)
-- Clear temporal patterns
-- Interpretability requirements
-- Limited computational resources
+**Sequential Modelling**
+In the given data, there are multiple user sessions captured. For earch session, there are a sequence of events.
+The problem is to name each of these events with proper step names. It is a classification of each event to a Step name.
+As the event logs are inherently sequential. The meaning of an event often depends on:
+•	The events before it (context).
+•	The events after it (future context in offline setting).
+So, considering the previous and next events is also important to classify an event to a step name. THis is the reason
+why sequence modelling is being choosen.
+
+There are several different sequence models available.
+- RNN models
+- CNN models
+- Transformers
+- Classic ML approaches
+- Hybrid or attention RNN models
+
+Classic ML models like Ctaboost or XGBoost
+ Strengths:
+    - Easy to interpret
+    - Can be easy to get features using domain knowledge
+ Limitations:
+  - Quality depends on the designed features
+  - They don’t capture complex features
+  - do not naturally account for sequence ordering
+CNN models:
+  **BiLSTM** for:
+  - Handles variable-length sequences.
+  - Good at modeling temporal dependencies.
+  - Bidirectional variant captures both past and future context.
+
+  - Smaller datasets (< 50K events)
+  - Interpretability requirements
+  - Limited computational resources
 
 **Transformer** for:
 - Large datasets (> 100K events)
@@ -450,3 +496,11 @@ model:
 - Enable batch processing
 
 
+
+# Improvements for the current method
+Improvements:
+- Addressing imbalanced dataset
+- Using better embeddings for images like Efficient net instead of ImageNet50
+- Running different experiments on available features. Ex: Using event names as text feature because event names have more information about the user activity/action.
+
+# Other approaches to try on

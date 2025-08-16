@@ -419,96 +419,82 @@ model:
 
 ### Model Architecture Selection
 
-**Sequential Modelling**
+#### Why Sequential Modelling?
 In the given dataset, multiple user sessions are recorded, each consisting of a sequence of events.
-The task is to assign a meaningful step name to every event — effectively framing this as a classification problem at the event level.
+The task is to assign a **step name** to every event — effectively framing this as an **event-level classification problem**.
 
-Since event logs are inherently sequential, the interpretation of any given event often depends on its surrounding context:
+Event logs are inherently sequential, and the meaning of any given event often depends on its **context**:
+- **Previous events** provide historical context.
+- **Subsequent events** (when available in offline settings) provide future context.
 
-Previous events provide historical context.
+Because of this dependency, it is crucial to model the **entire sequence** rather than treating each event in isolation.
+This is why **sequence modeling approaches** are chosen.
 
-Subsequent events (when available in an offline setting) provide future context.
-
-Because of this dependency, it is crucial to model the sequence as a whole rather than treating each event in isolation. This is why sequence modeling approaches are chosen for the problem.
-
-There are several different sequence models available.
-- RNN models
+Available families of models:
+- Classic ML models (e.g., CatBoost, XGBoost)
 - CNN models
+- RNN models (BiLSTM, GRU, etc.)
 - Transformers
-- Classic ML approaches
-- Hybrid or attention RNN models
+- Hybrid/attention-based RNN models
 
-**Classic ML Models** (e.g., CatBoost, XGBoost)
+---
 
-Strengths:
+#### Classic ML Models (e.g., CatBoost, XGBoost)
+**Strengths**
+- Simple to interpret.
+- Easy to engineer features using domain knowledge.
 
-Simple to interpret.
+**Limitations**
+- Performance depends heavily on manual feature design.
+- Struggle to capture complex or latent patterns.
+- Do not naturally account for sequence ordering.
 
-Easy to engineer features using domain knowledge.
+---
 
-Limitations:
+#### CNN Models
+- Effective at extracting **local patterns** within subsequences.
+- Work well for shorter sequences where speed is important.
+- **Temporal Convolutional Networks (TCN)** — a CNN variant — use causal convolutions and dilations to handle longer sequences while preserving order.
 
-Performance depends heavily on manual feature design.
+---
 
-Struggle to capture complex or latent patterns.
+#### BiLSTM (Bidirectional LSTM)
+**Strengths**
+- Handles variable-length sequences naturally.
+- Learns temporal dependencies effectively.
+- Bidirectional variant captures **both past and future context**.
 
-Do not naturally account for sequence ordering.
+**Best suited when:**
+- Dataset size is relatively small (< 50K events).
+- Interpretability is important.
+- Computational resources are limited.
 
-**CNN Models**
+---
 
-Effective at extracting local patterns within subsequences.
+#### Transformers
+**Strengths**
+- State-of-the-art for many sequence modeling tasks.
+- Use **self-attention** to model relationships between any two events, regardless of distance.
+- Capture long-range and complex temporal dependencies.
+- Process sequences in parallel, making them efficient for **large datasets** and **multi-feature event representations**.
 
-Work well for shorter sequences where speed is important.
+**Best suited when:**
+- Dataset size is large (> 100K events).
+- Interaction patterns are complex.
+- Sequence length is long.
+- Accuracy is the **top priority**.
 
-Temporal Convolutional Networks (TCN), a CNN variant, use causal convolutions and dilations to handle longer sequences while preserving order.
+---
 
-**BiLSTM** (Bidirectional LSTM)
-
-Handles variable-length sequences naturally.
-
-Learns temporal dependencies effectively.
-
-Bidirectional variant captures both past and future context.
-
-Suitable when:
-
-Dataset size is relatively small (< 50K events).
-
-Interpretability is important.
-
-Computational resources are limited.
-
-**Transformers**
-
-State-of-the-art for many sequence modeling tasks.
-
-Use self-attention to model relationships between any two events, regardless of distance.
-
-Capture long-range and complex temporal dependencies.
-
-Process sequences in parallel, making them efficient for large datasets and multi-feature event representations.
-
-Best suited when:
-
-Dataset size is large (> 100K events).
-
-Interaction patterns are complex.
-
-Sequence length is long.
-
-Accuracy is the top priority.
-
-**Hybrid Models**
-
+#### Hybrid Models
 Combine strengths of multiple architectures.
 
-Example:
+**Example pipeline:**
+1. Use **CNNs** to extract local features.
+2. Use **RNNs (e.g., BiLSTM) + attention** to focus on the most informative parts of the sequence.
 
-Use CNNs to extract local features.
+This enables **both local feature extraction and global sequence understanding**.
 
-Use RNNs (e.g., BiLSTM) with attention mechanisms to focus on the most informative parts of the sequence.
-
-This enables both local feature extraction and global sequence understanding.
 ## 🎯 Best Practices
 
 ### Data Quality

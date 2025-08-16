@@ -100,6 +100,7 @@ irm https://astral.sh/uv/install.ps1 | iex
 uv venv --python 3.10
 # macOS/Linux:
 source .venv/bin/activate
+
 # Windows PowerShell:
 .venv\Scripts\Activate.ps1
 
@@ -113,14 +114,17 @@ uv sync
 # pick one or both
 uv sync --extra multimodal
 uv sync --extra dev
+
 # or everything
 uv sync --all-extras
 
 # 4) Run the Project
 # 1.  change the directory to project directory
 cd /<project_directory>/task_classification
+
 # 2. Run training pipeline
 python /<project_directory>/task_classification/scripts/train.py
+
 # 3. Inference
 python /<project_directory>/task_classification/scripts/inference.py
 
@@ -216,7 +220,7 @@ train:
 uv run python scripts/train.py
 
 # Or directly
-uv run python -m src.training_pipeline
+python /<project_directory>/task_classification/scripts/train.py
 ```
 
 ### With Hyperparameter Optimization
@@ -299,7 +303,7 @@ This prevents overfitting and provides robust hyperparameter selection.
 uv run python scripts/inference.py
 
 # Or directly
-uv run python -m src.inference
+python /<project_directory>/task_classification/scripts/inference.py
 ```
 
 ### Inference Process
@@ -348,7 +352,7 @@ Coverage: 0.832 | Precision: 0.953 | F1: 0.950
 ```
 fused = [event_emb; cat_embs; num_proj; text_proj; img_proj]
 ```
-Current used this method.
+Currently, used this method.
 
 #### Gated Fusion Mode
 ```
@@ -416,13 +420,16 @@ model:
 ### Model Architecture Selection
 
 **Sequential Modelling**
-In the given data, there are multiple user sessions captured. For earch session, there are a sequence of events.
-The problem is to name each of these events with proper step names. It is a classification of each event to a Step name.
-As the event logs are inherently sequential. The meaning of an event often depends on:
-•	The events before it (context).
-•	The events after it (future context in offline setting).
-So, considering the previous and next events is also important to classify an event to a step name. THis is the reason
-why sequence modelling is being choosen.
+In the given dataset, multiple user sessions are recorded, each consisting of a sequence of events.
+The task is to assign a meaningful step name to every event — effectively framing this as a classification problem at the event level.
+
+Since event logs are inherently sequential, the interpretation of any given event often depends on its surrounding context:
+
+Previous events provide historical context.
+
+Subsequent events (when available in an offline setting) provide future context.
+
+Because of this dependency, it is crucial to model the sequence as a whole rather than treating each event in isolation. This is why sequence modeling approaches are chosen for the problem.
 
 There are several different sequence models available.
 - RNN models
@@ -431,30 +438,77 @@ There are several different sequence models available.
 - Classic ML approaches
 - Hybrid or attention RNN models
 
-Classic ML models like Ctaboost or XGBoost
- Strengths:
-    - Easy to interpret
-    - Can be easy to get features using domain knowledge
- Limitations:
-  - Quality depends on the designed features
-  - They don’t capture complex features
-  - do not naturally account for sequence ordering
-CNN models:
-  **BiLSTM** for:
-  - Handles variable-length sequences.
-  - Good at modeling temporal dependencies.
-  - Bidirectional variant captures both past and future context.
+**Classic ML Models** (e.g., CatBoost, XGBoost)
 
-  - Smaller datasets (< 50K events)
-  - Interpretability requirements
-  - Limited computational resources
+Strengths:
 
-**Transformer** for:
-- Large datasets (> 100K events)
-- Complex interaction patterns
-- Long sequences
-- When accuracy is paramount
+Simple to interpret.
 
+Easy to engineer features using domain knowledge.
+
+Limitations:
+
+Performance depends heavily on manual feature design.
+
+Struggle to capture complex or latent patterns.
+
+Do not naturally account for sequence ordering.
+
+**CNN Models**
+
+Effective at extracting local patterns within subsequences.
+
+Work well for shorter sequences where speed is important.
+
+Temporal Convolutional Networks (TCN), a CNN variant, use causal convolutions and dilations to handle longer sequences while preserving order.
+
+**BiLSTM** (Bidirectional LSTM)
+
+Handles variable-length sequences naturally.
+
+Learns temporal dependencies effectively.
+
+Bidirectional variant captures both past and future context.
+
+Suitable when:
+
+Dataset size is relatively small (< 50K events).
+
+Interpretability is important.
+
+Computational resources are limited.
+
+**Transformers**
+
+State-of-the-art for many sequence modeling tasks.
+
+Use self-attention to model relationships between any two events, regardless of distance.
+
+Capture long-range and complex temporal dependencies.
+
+Process sequences in parallel, making them efficient for large datasets and multi-feature event representations.
+
+Best suited when:
+
+Dataset size is large (> 100K events).
+
+Interaction patterns are complex.
+
+Sequence length is long.
+
+Accuracy is the top priority.
+
+**Hybrid Models**
+
+Combine strengths of multiple architectures.
+
+Example:
+
+Use CNNs to extract local features.
+
+Use RNNs (e.g., BiLSTM) with attention mechanisms to focus on the most informative parts of the sequence.
+
+This enables both local feature extraction and global sequence understanding.
 ## 🎯 Best Practices
 
 ### Data Quality
@@ -496,11 +550,62 @@ CNN models:
 - Enable batch processing
 
 
-
 # Improvements for the current method
-Improvements:
-- Addressing imbalanced dataset
-- Using better embeddings for images like Efficient net instead of ImageNet50
-- Running different experiments on available features. Ex: Using event names as text feature because event names have more information about the user activity/action.
+Data Handling & Preprocessing
 
-# Other approaches to try on
+Address imbalanced datasets through resampling strategies, class weights, or focal loss.
+
+Handle missing actions more meaningfully: currently grouped as Unknown, but could be mapped to Action or Action* since they likely represent clicks or similar operations.
+
+Feature Engineering & Embeddings
+
+Better image embeddings: use modern backbones like EfficientNet instead of ImageNet-50 features.
+
+Leverage event names as text features:
+
+Event names often contain rich, meaningful information (e.g., “Read: IBBR - IBS Customer Master File Inquiry in ibbr-global.dhl”).
+
+Different group_ids can map to different contexts, making this distinction useful.
+
+Numerical information in event names:
+
+Some events contain identifiers or codes (e.g., “Read: 6999997944 . A548 . in dpdhl.sharepoint”).
+
+These may carry important semantic information and should be captured explicitly.
+
+Experiment with group_id-only predictions to assess predictive power of session grouping.
+
+Improved embedding fusion: instead of simple concatenation, try:
+
+Adding embeddings before concatenation.
+
+Using specialized fusion mechanisms (e.g., cross-attention, gated fusion).
+
+# Other approaches to exlore
+Multimodal Extensions
+
+Screenshots as input: incorporate visual evidence of user actions, capturing patterns that event metadata alone cannot.
+
+Model Architectures
+
+Hybrid models:
+
+Temporal Convolutional Networks (TCN) for local temporal patterns: https://github.com/locuslab/TCN
+
+Attention-based RNNs (e.g., BiLSTM + attention) for contextual focus.
+
+HT-Transformers (https://www.arxiv.org/abs/2508.01474):
+
+Introduce history tokens to encode the entire sequence history.
+
+Promising for improving sequence-level accuracy.
+
+Multimodal Fusion
+
+Explore different fusion strategies for combining text, image, and tabular embeddings:
+
+Early fusion (embedding-level).
+
+Late fusion (decision-level).
+
+Cross-modal attention mechanisms.
